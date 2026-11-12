@@ -1,8 +1,6 @@
 import logging
-import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Tuple
 
 from transformers import pipeline
 from demucs.separate import main as demucs_main
@@ -34,16 +32,15 @@ def separate_vocals(input_audio, output_dir):
     demucs_main(args)
     print("  Demucs complete.")
 
-    # Demucs creates an output subfolder per run; find the most recent
-    folders = sorted(Path(output_dir).glob("*/"), key=os.path.getmtime)
-    if not folders:
-        raise RuntimeError("Demucs did not produce an output folder")
+    # Demucs nests results under both a model directory and a track directory.
+    vocal_files = list(Path(output_dir).rglob("vocals.wav"))
+    if not vocal_files:
+        raise RuntimeError("Demucs did not produce vocals.wav")
 
-    demucs_folder = folders[-1]
-    print(f"  Found output folder: {demucs_folder.name}")
-
-    vocal_file = demucs_folder / "vocals.wav"
-    accomp_file = demucs_folder / "no_vocals.wav"
+    vocal_file = vocal_files[0]
+    accomp_file = vocal_file.with_name("no_vocals.wav")
+    if not accomp_file.exists():
+        raise RuntimeError(f"Demucs did not produce {accomp_file.name}")
 
     print(f"  Vocals: {vocal_file}")
     print(f"  Instrumental: {accomp_file}")
@@ -76,6 +73,8 @@ def transcribe_audio(vocal_wav):
     print("  Transcribing audio...")
     result = _WHISPER_PIPELINE(str(vocal_wav))
     transcript = result.get("text", "")
+    if not transcript.strip():
+        raise RuntimeError("Speech recognition did not detect any lyrics")
     print(f"  Transcription complete.")
 
     logging.debug("Transcribed lyrics: %s", transcript)
@@ -156,8 +155,7 @@ def tts_generate(text, output_wav, language="es"):
 ###############################################
 def mix_vocals_and_instrumental(vocals, instrumental, output_path):
     """
-    Simple overlay mix using ffmpeg.
-    (For more advanced mixing, adjust gain or alignment.)
+    Mix the generated voice and instrumental as audio streams.
     """
     logging.info("[5/5] Mixing translated vocals with instrumental")
     print(f"  Vocals: {vocals}")
@@ -171,12 +169,19 @@ def mix_vocals_and_instrumental(vocals, instrumental, output_path):
         raise FileNotFoundError(f"Instrumental file not found: {instrumental}")
 
     print("  Mixing audio with ffmpeg...")
+    instrumental_stream = ffmpeg.input(instrumental)
+    vocals_stream = ffmpeg.input(vocals)
+    mixed_audio = ffmpeg.filter(
+        [instrumental_stream, vocals_stream],
+        "amix",
+        inputs=2,
+        duration="longest",
+    )
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     (
         ffmpeg
-        .input(instrumental)
-        .filter("volume", 1.0)
-        .overlay(ffmpeg.input(vocals), shortest=1)
-        .output(output_path)
+        .output(mixed_audio, str(output_path))
         .overwrite_output()
         .run(quiet=True)
     )
@@ -223,6 +228,8 @@ def translate_song(
 
         # Step 3: MT
         translated_lyrics = translate_text(transcript, src=src_lang, tgt=tgt_lang)
+        if not translated_lyrics.strip():
+            raise RuntimeError("Machine translation returned empty text")
         print()
 
         # Step 4: TTS

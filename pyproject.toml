@@ -1,7 +1,7 @@
 [project]
 name = "song2songmt"
 version = "0.1.0"
-description = "Song translation via source separation and neural MT"
+description = "Experimental audio translation pipeline using source separation, ASR, neural MT, and TTS"
 requires-python = ">=3.10"
 dependencies = [
     "demucs",
@@ -9,3 +9,6 @@ dependencies = [
     "transformers",
     "TTS",
 ]
+
+[tool.uv]
+package = false

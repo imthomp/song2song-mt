@@ -1,2 +1,7 @@
-.venv
-songs
+.venv/
+__pycache__/
+*.py[cod]
+
+# Keep personal audio and generated outputs out of the public repository.
+/songs/input/
+/songs/output/
